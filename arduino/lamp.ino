@@ -5,8 +5,21 @@
 #include "DHTsensor.h"
 
 #include "HCSR04sensor.h"
+#include "NonBlockingRtttl.h"
+#include "RtttlTrackerList.h"
 
 
+//------------------------------------------------
+//--- DEBUG  FLAGS     ---------------------------
+//------------------------------------------------
+//#define LAMP_HCSR04_MEDIAN_DEBUG
+//#define LAMP_STATES_DEBUG
+
+
+//------------------------------------------------
+//--- ENABLE  FLAGS     --------------------------
+//------------------------------------------------
+//#define ENABLE_SERIAL_INPUT
 
 
 //------------------------------------------------
@@ -26,9 +39,11 @@ const int PIN_BUZZER                =7;
 // INTERRUPTS
 const int INT_SENSOR_HCSR04         =0;
 
+#define MEDIAN_FILTER_SIZE_SENSOR_HCSR04  5
+
 // Sensors
 DHTsensor    GLBsensorDHT;
-HCSR04sensor GLBsensorHC(PIN_SENSOR_HCSR04_TRIGGER, PIN_SENSOR_HCSR04_ECHO, INT_SENSOR_HCSR04);
+HCSR04sensor GLBsensorHC(PIN_SENSOR_HCSR04_TRIGGER, PIN_SENSOR_HCSR04_ECHO, INT_SENSOR_HCSR04,MEDIAN_FILTER_SIZE_SENSOR_HCSR04);
 
 // Misc 
 unsigned int aliveLoopCounter=0;
@@ -37,13 +52,30 @@ unsigned int sCounter=0;
 unsigned int latestTempReported=0;
 
 
+char    GLBauxString[100];  //for copying PROGMEM to RAM, use it in rtt and ls to save ram and avoid corruption issues.
+
+#ifdef ENABLE_SERIAL_INPUT
 char    GLBserialInputString[100]; // a string to hold incoming data
-char    GLBauxString[100];
 int     GLBserialIx=0;
 bool    GLBserialInputStringReady = false; // whether the string is complete
+#endif
 
 const char inputBootString[] PROGMEM ={":LP0020:LT0005:LMK:LCFF,00,00:LQ:LMk:LQ:LMN"};
 const char inputTest[]  PROGMEM = {":LP0200:LT0050:LMN:LQ:LMA:LP0100:LCFF,00,00:LQ:LMA:LP0100:LC00,FF,00:LQ:LMA:LP0100:LC00,00,FF"};
+
+const char LSdistanceZero[]  PROGMEM = {":LMN:LP0000"};
+const char LSdistanceA[]  PROGMEM = {":LMA:LP0000:LCFF,00,00"};
+const char LSdistanceB[]  PROGMEM = {":LMA:LP0000:LC00,FF,00"};
+const char LSdistanceC[]  PROGMEM = {":LMA:LP0000:LC00,00,FF"};
+const char LSoff[]  PROGMEM = {":LX"};
+
+const char LStempA[]  PROGMEM = {":LX:LMA:LP0000:LT0000:LC33,33,FF"};
+const char LStempB[]  PROGMEM = {":LX:LMA:LP0000:LT0000:LC99,99,FF"};
+const char LStempC[]  PROGMEM = {":LX:LMA:LP0000:LT0000:LCB3,FF,B3"};
+const char LStempD[]  PROGMEM = {":LX:LMA:LP0000:LT0000:LCFF,FF,99"};
+const char LStempE[]  PROGMEM = {":LX:LMA:LP0000:LT0000:LCFF,CC,66"};
+const char LStempF[]  PROGMEM = {":LX:LMA:LP0000:LT0000:LCFF,5C,33"};
+
 
 
 #define NUM_LEDS 3
@@ -59,6 +91,39 @@ LSEM GLBledStrip(GLBledStripBufferMem, NUM_LEDS, GLBcallbackPauseLS, GLBcallback
 unsigned long time;
 SimpleTimer mainTimers;
 
+//--------------- SONGS ------------------------
+const char  mario[] PROGMEM = {"mario:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g,8p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,16p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16c7,16p,16c7,16c7,p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16d#6,8p,16d6,8p,16c6\0"};
+
+const char  mi[] PROGMEM = {"MissionImp:d=16,o=6,b=95:32d,32d#,32d,32d#,32d,32d#,32d,32d#,32d,32d,32d#,32e,32f,32f#,32g,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,a#,g,2d,32p,a#,g,2c#,32p,a#,g,2c,a#5,8c,2p,32p,a#5,g5,2f#,32p,a#5,g5,2f,32p,a#5,g5,2e,d#,8d\0"};
+
+const char  indiana[] PROGMEM = {"Indiana:d=4,o=5,b=250:e,8p,8f,8g,8p,1c6,8p.,d,8p,8e,1f,p.,g,8p,8a,8b,8p,1f6,p,a,8p,8b,2c6,2d6,2e6,e,8p,8f,8g,8p,1c6,p,d6,8p,8e6,1f.6,g,8p,8g,e.6,8p,d6,8p,8g,e.6,8p,d6,8p,8g,f.6,8p,e6,8p,8d6,2c6\0"};
+
+
+const char  StarWars[] PROGMEM = {"StarWars:d=4,o=5,b=45:32p,32f#,32f#,32f#,8b.,8f#.6,32e6,32d#6,32c#6,8b.6,16f#.6,32e6,32d#6,32c#6,8b.6,16f#.6,32e6,32d#6,32e6,8c#.6,32f#,32f#,32f#,8b.,8f#.6,32e6,32d#6,32c#6,8b.6,16f#.6,32e6,32d#6,32c#6,8b.6,16f#.6,32e6,32d#6,32e6,8c#6\0"};
+
+const char  AbbaMammaMia[] PROGMEM = {"AbbaMammaMia:d=4,o=5,b=40:32f6,32d#6,32f6,32d#6,8p,32d#6,32d#6,32f6,32g6,32f6,32d#6,16p,16f6,32d#6,16p,16g#6,32g#6,32g#6,32g#6,16g6,16d#6,16p,32f6,32d#6,32f6,32d#6,8p,32d#6,32d#6,32f6,32g6,32f6,32d#6,16p,16f6,32d#6,16p,16g#6,32g#6,32g#6,32g#6,16g6,16d#6,16p,16a#.6,32a#6,32a#6,16a#6,16f6,16g6,16g#6,16p,32p,16g.6,32g6,32g6,16g6,16d6,16d#6,16f6,16p,32p,16f6,16d#6,32p,16g#6,32g#6,32g#6,32g#6,32g6,32d#6,32f6,32d#6\0"};
+
+
+
+const char warmingUp[] PROGMEM ={"marioShort:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g\0"};
+const char warmingUp2[] ={"marioShort:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g\0"};
+
+
+#define MAX_AUDIOS 5
+/* ALTERNATIVE WITHOUT TRACKING 
+const char *audiosTable[MAX_AUDIOS]= {
+  mario,mi,indiana
+};
+*/
+
+RtttlTrackerItem  audios[MAX_AUDIOS];
+RtttlTrackerList  audiosTracker;
+
+
+#define DISTANCE_ZERO   10
+#define DISTANCE_A      40
+
+
 //------------------------------------------------
 //--- GLOBAL FUNCTIONS ---------------------------
 //------------------------------------------------
@@ -69,10 +134,23 @@ SimpleTimer mainTimers;
 void STATE_init(void);
 void STATE_welcome(void);
 void STATE_idle(void);
+#ifdef ENABLE_SERIAL_INPUT
 void STATE_LDcmd(void);
+#endif
+void STATE_distanceZero(void);
+void STATE_distanceA(void);
+void STATE_singing(void);
 
 // State pointer function
 void (*GLBptrStateFunc)();
+
+
+//------------------------------------------------
+void sendFlashStringLS(const char *str)
+{
+  strcpy_P(GLBauxString,(char*)str);
+  GLBledStrip.processCommands(GLBauxString);
+}
 
 
 //------------------------------------------------
@@ -115,8 +193,7 @@ void GLBcallbackLoggingLedWhite(void)
 void GLBcallbackLoggingLedStrip(void)
 {
   Serial.println(F("DEBUG: Led strip..."));
-  strcpy_P(GLBauxString,(char*)inputTest);
-  GLBledStrip.processCommands(GLBauxString);
+  sendFlashStringLS(inputTest);
 }
 //------------------------------------------------
 void GLBcallbackLoggingUltrasonic(void)
@@ -128,46 +205,31 @@ void GLBcallbackLoggingUltrasonic(void)
     GLBsensorHC.trigger();  
   }
 }
-
-
-
-
 //------------------------------------------------
-
-
+//------------------------------------------------
 //------------------------------------------------
 
 void setup() { 
-
-  tone(PIN_BUZZER, 1000, 100);
-  delay(100);
-  tone(PIN_BUZZER, 1000, 100);
   // Serial to debug AND comunication protocolo with PI              
   Serial.begin(9600);
   Serial.println(F("Setup... 'came on, be my baby, came on'"));
 
+#ifdef ENABLE_SERIAL_INPUT
   GLBserialInputString[0]=0;
-
+#endif 
   GLBptrStateFunc = STATE_init;
   Serial.println(F("STATE INIT"));
   FastLED.addLeds<WS2812B,PIN_LED_STRIP,GRB>(GLBledStripBufferMem, NUM_LEDS);
-
-
 
   Serial.println("Setup DHT22 ");
   if (GLBsensorDHT.setup(PIN_SENSOR_TEMP)!=0) {
       Serial.print("Failing dht22 setup on pin:");
       Serial.println(PIN_SENSOR_TEMP);
   }
-
-
   pinMode(PIN_LED_WHITE, OUTPUT);
-
-
   GLBsensorHC.setup();
   GLBsensorHC.trigger();  
-
-  // TODO TEST
+  /* TODO constant sensor testing 
   mainTimers.setInterval(2000,GLBcallbackLogging);
 
   mainTimers.setInterval(7000,GLBcallbackLoggingTemp);
@@ -175,17 +237,30 @@ void setup() {
   mainTimers.setInterval(5000,GLBcallbackLoggingLedWhite);
 
   mainTimers.setInterval(10000,GLBcallbackLoggingLedStrip);
-
   mainTimers.setInterval(1000,GLBcallbackLoggingUltrasonic);
 
+  */
+
+  randomSeed(analogRead(0));
+
+  //memset(audios,0,sizeof(RtttlTrackerItem)*MAX_AUDIOS);
+  audiosTracker.setup(audios,MAX_AUDIOS);
+  audiosTracker.addItem(mario);
+  audiosTracker.addItem(mi);
+  audiosTracker.addItem(indiana);
+  audiosTracker.addItem(StarWars);
+  audiosTracker.addItem(AbbaMammaMia);
 
 
-  tone(PIN_BUZZER, 500, 200);
 
+  //REMINDER IF ADD MORE, MAKE SURE MAX_AUDIOS is sync
 
 }
 
 //------------------------------------------------
+
+#ifdef ENABLE_SERIAL_INPUT
+
 void serialEvent() {
   while (Serial.available()) {
      char inChar = (char)Serial.read();
@@ -198,8 +273,10 @@ void serialEvent() {
      GLBserialInputString[GLBserialIx++]=inChar;
   }
 }
+#endif
 
 //-------------------------------------------------
+#ifdef ENABLE_SERIAL_INPUT
 void processSerialInputString()
 {
   strcpy(GLBauxString,GLBserialInputString);
@@ -207,34 +284,98 @@ void processSerialInputString()
   GLBserialInputStringReady = false;
   GLBledStrip.processCommands(GLBauxString);
 }
+#endif
+
 //-------------------------------------------------
 void STATE_init(void)
 {
-  Serial.println(F("DEBUG: inputBootString..."));
-  strcpy_P(GLBauxString,(char*)inputBootString);
-  GLBledStrip.processCommands(GLBauxString);
-
-  GLBptrStateFunc=STATE_welcome;
+  #ifdef LAMP_STATES_DEBUG
   Serial.println(F("STATE INIT -> WELCOME"));
+  #endif
+  tone(PIN_BUZZER, 1000, 20);
+
+  digitalWrite(PIN_LED_WHITE,HIGH);
+  delay(500);
+  digitalWrite(PIN_LED_WHITE,LOW);
+  delay(500);
+  digitalWrite(PIN_LED_WHITE,HIGH);
+
+  sendFlashStringLS(inputBootString);
+  GLBptrStateFunc=STATE_welcome;
+//  rtttl::beginF(PIN_BUZZER, warmingUp);
+  rtttl::begin(PIN_BUZZER, warmingUp2);
+
 }
 //-------------------------------------------------
 void STATE_welcome(void)
 {
-  if (GLBledStrip.isIdle()) {
+  if (GLBledStrip.isIdle() && !rtttl::isPlaying()) {
     GLBptrStateFunc=STATE_idle;
+#ifdef LAMP_STATES_DEBUG
     Serial.println(F("STATE WELCOME -> IDLE"));
+#endif
   }
 }
 //-------------------------------------------------
 void STATE_idle(void)
 {
+  int d=GLBsensorHC.getLatestDistanceMedian();
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+  int d2=GLBsensorHC.getLatestDistanceRead();
+#endif
+
+#ifdef ENABLE_SERIAL_INPUT
   if (GLBserialInputStringReady){
     processSerialInputString();
     GLBptrStateFunc=STATE_LDcmd;
-    Serial.println(F("STATE IDLE -> CMD"));
+#ifdef LAMP_STATES_DEBUG
+    Serial.println(F("STATE IDLE -> CMD LS"));
+#endif 
   }
+#endif
+
+  if (d < DISTANCE_ZERO)            { 
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_distanceZero ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.println(d2);
+#endif
+#endif
+    GLBptrStateFunc=STATE_distanceZero; 
+    sendFlashStringLS(LSdistanceZero);  
+    rtttl::stop(); 
+  }  
+  if (d > DISTANCE_ZERO   && d< DISTANCE_A)  { 
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_distanceA ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.println(d2);
+#endif
+#endif
+    GLBptrStateFunc=STATE_distanceA;
+    sendFlashStringLS(LSdistanceA);  
+//    rtttl::beginF(PIN_BUZZER,audiosTracker.getRandomItem(false,true));
+    rtttl::beginF(PIN_BUZZER,audiosTracker.getOrderedItem(true));  
+
+  }
+
+  if (GLBptrStateFunc!=STATE_idle) return;
+ 
+  float t=GLBsensorDHT.getTemperature();
+  if      (t < 15.0)  { sendFlashStringLS(LStempA);} 
+  else if (t < 21.0)  { sendFlashStringLS(LStempB);}  
+  else if (t < 25.0)  { sendFlashStringLS(LStempC);} 
+  else if (t < 28.0)  { sendFlashStringLS(LStempD);} 
+  else if (t < 31.0)  { sendFlashStringLS(LStempE);} 
+  else                { sendFlashStringLS(LStempF);} 
 }
 
+
+#ifdef ENABLE_SERIAL_INPUT
 //-------------------------------------------------
 void STATE_LDcmd(void)
 {
@@ -243,25 +384,164 @@ void STATE_LDcmd(void)
   }
   else if (GLBledStrip.isIdle()) {
     GLBptrStateFunc=STATE_idle;
+#ifdef LAMP_STATES_DEBUG
     Serial.println(F("STATE LD CMD -> IDLE"));
+#endif
+  }
+}
+#endif
+
+//-------------------------------------------------
+void STATE_distanceZero(void)
+{
+  int d=GLBsensorHC.getLatestDistanceMedian();
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+  int d2=GLBsensorHC.getLatestDistanceRead();
+#endif
+/*
+
+    Serial.print(F(" ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.println(d2);
+#endif    Serial.print(F(") "));
+*/
+
+  if (d > DISTANCE_ZERO)            { 
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_idle ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.println(d2);
+#endif
+#endif
+    GLBptrStateFunc=STATE_idle; 
+    //tone(PIN_BUZZER, 2000, 50); 
+    return;
+  } 
+  rtttl::stop(); //Just in case, silence pls
+}
+
+//-------------------------------------------------
+void STATE_distanceA(void)
+{
+  int d=GLBsensorHC.getLatestDistanceMedian();
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+  int d2=GLBsensorHC.getLatestDistanceRead();
+#endif  
+  if (d < DISTANCE_ZERO)            { 
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_distanceZero ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.println(d2);
+#endif
+#endif
+    GLBptrStateFunc=STATE_distanceZero; 
+    sendFlashStringLS(LSdistanceZero);  
+    rtttl::stop(); 
+    //tone(PIN_BUZZER, 2000, 50);  
+    return;
+  } 
+  if (d < DISTANCE_A) {
+    //keep it here! TODO sing other song if still here.
+    return;
+  }
+
+  if (rtttl::isPlaying()) {
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_singing ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.println(d2);
+#endif
+#endif
+    GLBptrStateFunc=STATE_singing;
+    //tone(PIN_BUZZER, 2000, 50); 
+    return;
+  }
+  else {
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_idle ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.println(d2);
+#endif
+#endif
+    //tone(PIN_BUZZER, 2000, 50);  
   }
 }
 
+//-------------------------------------------------
+void STATE_singing(void)
+{
+  int d=GLBsensorHC.getLatestDistanceMedian();
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+  int d2=GLBsensorHC.getLatestDistanceRead();
+#endif
+  if (d < DISTANCE_ZERO)            { 
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_distanceZero ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.println(d2);
+#endif
+#endif
+    GLBptrStateFunc=STATE_distanceZero; 
+    sendFlashStringLS(LSdistanceZero);  
+    rtttl::stop(); 
+    //tone(PIN_BUZZER, 2000, 50); 
+    return;
+  } 
+  if (d < DISTANCE_A) {
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_distanceA ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.println(d2);
+#endif
+#endif
+    GLBptrStateFunc=STATE_distanceA;
+    sendFlashStringLS(LSdistanceA);  
+    //tone(PIN_BUZZER, 2000, 20); 
+    //delay(20);
+    //tone(PIN_BUZZER, 2000, 20); 
+    //delay(20);
+//    rtttl::beginF(PIN_BUZZER,audiosTracker.getRandomItem(false,true));
+    rtttl::beginF(PIN_BUZZER,audiosTracker.getOrderedItem(true));  
 
+    return;
+  }
+
+  if (!rtttl::isPlaying()) {
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_idle ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.println(d2);
+#endif
+#endif
+    GLBptrStateFunc=STATE_idle;
+    return;
+  }
+}
 
 //-------------------------------------------------
 //-------------------------------------------------
 //-------------------------------------------------
 void loop() { 
-  
-
-
+ 
   //------------- INPUT REFRESHING ----------------
   GLBsensorDHT.refresh();
-  int distance = GLBsensorHC.getLatestDistanceRead();
-  if ((distance > 5) &&  (distance < 50)) {
-    tone(PIN_BUZZER, 2000, 10);
-  }
+  GLBsensorHC.refresh();
     
   //--------- TIME TO THINK MY FRIEND -------------
   // State machine as main controller execution
@@ -271,6 +551,10 @@ void loop() {
   // ------------- OUTPUT REFRESHING ---------------
   GLBledStrip.refresh();
   FastLED.show();
+
+  //Serial.println(F("PLAY_GO"));
+  rtttl::play();
+  //Serial.println(F("PLAY_OUT"));
 
 
 }

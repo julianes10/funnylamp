@@ -13,7 +13,11 @@
 //--- DEBUG  FLAGS     ---------------------------
 //------------------------------------------------
 //#define LAMP_HCSR04_MEDIAN_DEBUG
-//#define LAMP_STATES_DEBUG
+#define LAMP_STATES_DEBUG
+
+
+#define LAMP_TEMPCOLOR_DEBUG
+
 
 
 //------------------------------------------------
@@ -78,11 +82,31 @@ const char LSsinging[]          PROGMEM = {":LX:LMN:LT0000:LP0100\0"};
 const char LStempVeryCold[]   PROGMEM = {":LX:LMA:LT0000:LP0000:LC00,00,FF\0"};
 const char LStempCold[]       PROGMEM = {":LX:LMA:LT0000:LP0000:LC50,50,FF\0"};
 const char LStempOK[]         PROGMEM = {":LX:LMA:LT0000:LP0000:LC46,82,82\0"};
-const char LStempWarm[]       PROGMEM = {":LX:LMA:LT0000:LP0000:LCFB,F7,F1\0"};
-const char LStempVeryWarm[]   PROGMEM = {":LX:LMA:LT0000:LP0000:LCFB,D9,71\0"};;
-const char LStempHot[]        PROGMEM = {":LX:LMA:LT0000:LP0000:LCFB,A0,22\0"};
-const char LStempVeryHot[]    PROGMEM = {":LX:LMA:LT0000:LP0000:LCFF,20,20\0"};
+const char LStempWarm[]       PROGMEM = {":LX:LMA:LT0000:LP0000:LCFB,D9,71\0"};
+const char LStempVeryWarm[]   PROGMEM = {":LX:LMA:LT0000:LP0000:LCFB,A0,22\0"};
+const char LStempHot[]        PROGMEM = {":LX:LMA:LT0000:LP0000:LCFF,30,30\0"};
+const char LStempVeryHot[]    PROGMEM = {":LX:LMA:LT0000:LP0000:LCFF,00,00\0"};
 
+
+const char LStempVeryColdZ[]   PROGMEM = {":LX:LMA:LT0000:LP0000:LC00,00,60\0"};
+const char LStempColdZ[]       PROGMEM = {":LX:LMA:LT0000:LP0000:LC18,18,60\0"};
+const char LStempOKZ[]         PROGMEM = {":LX:LMA:LT0000:LP0000:LC18,30,30\0"};
+const char LStempWarmZ[]       PROGMEM = {":LX:LMA:LT0000:LP0000:LC60,50,25\0"};
+const char LStempVeryWarmZ[]   PROGMEM = {":LX:LMA:LT0000:LP0000:LC60,50,08\0"};
+const char LStempHotZ[]        PROGMEM = {":LX:LMA:LT0000:LP0000:LC60,12,12\0"};
+const char LStempVeryHotZ[]    PROGMEM = {":LX:LMA:LT0000:LP0000:LC60,00,00\0"};
+
+/*
+const char LStempVeryColdZ[]   PROGMEM = {":LX:LMO01:LT0000:LP0000:LC00,00,80\0"};
+const char LStempColdZ[]       PROGMEM = {":LX:LMO01:LT0000:LP0000:LC05,05,40\0"};
+const char LStempOKZ[]         PROGMEM = {":LX:LMO01:LT0000:LP0000:LC05,10,10\0"};
+const char LStempWarmZ[]       PROGMEM = {":LX:LMO01:LT0000:LP0000:LC10,10,10\0"};
+const char LStempVeryWarmZ[]   PROGMEM = {":LX:LMO01:LT0000:LP0000:LC20,15,05\0"};;
+const char LStempHotZ[]        PROGMEM = {":LX:LMO01:LT0000:LP0000:LC20,12,02\0"};
+const char LStempVeryHotZ[]    PROGMEM = {":LX:LMO01:LT0000:LP0000:LC20,02,02\0"};
+*/
+
+const char *GLB_lsTempBK=0;
 
 #define NUM_LEDS 3
 CRGB GLBledStripBufferMem[NUM_LEDS];
@@ -145,7 +169,18 @@ RtttlTrackerList  audiosTracker;
 int GLB_timerZ1=-1;
 bool GLB_timerZ1_expired=false;
 
+#define TIMEOUT_IDLEZ  5000  // it covers singing temp
+int GLB_timerIdleZ=-1;
+bool GLB_timerIdleZ_expired=false;
 
+
+
+#ifdef LAMP_TEMPCOLOR_DEBUG
+#define TIMEOUT_TEMPCOLOR  2000
+int GLB_timerTempcolor=-1;
+bool GLB_timerTempcolor_expired=false;
+float GLB_Tempcolor=11.2;
+#endif 
 
 
 //------------------------------------------------
@@ -158,6 +193,7 @@ bool GLB_timerZ1_expired=false;
 void STATE_init(void);
 void STATE_welcome(void);
 void STATE_idle(void);
+void STATE_idleZ(void);
 #ifdef ENABLE_SERIAL_INPUT
 void STATE_LDcmd(void);
 #endif
@@ -234,12 +270,48 @@ void GLBcallbackTimeoutZ1(void)
   GLB_timerZ1_expired=true;
 }
 
+//------------------------------------------------
+void GLBcallbackTimeoutIdleZ(void)
+{
+  if (GLB_timerIdleZ != -1)     
+    mainTimers.deleteTimer(GLB_timerIdleZ);
+  GLB_timerIdleZ=-1;
+  GLB_timerIdleZ_expired=true;
+}
+
+#ifdef LAMP_TEMPCOLOR_DEBUG
+//------------------------------------------------
+void GLBcallbackTimeoutTempcolor(void)
+{
+  if (GLB_timerTempcolor != -1)     
+    mainTimers.deleteTimer(GLB_timerTempcolor);
+  GLB_timerTempcolor=-1;
+  GLB_timerTempcolor_expired=true;
+}
+
+//------------------------------------------------
+void resetTimerTempcolor(void)
+{
+  GLBcallbackTimeoutTempcolor();
+  GLB_timerTempcolor_expired=false;
+}
+#endif
+
+
 
 //------------------------------------------------
 void resetTimerZ(void)
 {
   GLBcallbackTimeoutZ1();
   GLB_timerZ1_expired=false;
+}
+
+
+//------------------------------------------------
+void resetTimerIdleZ(void)
+{
+  GLBcallbackTimeoutIdleZ();
+  GLB_timerIdleZ_expired=false;
 }
 
 
@@ -255,6 +327,43 @@ void GLBsingTemp()
   float t=GLBsensorDHT.getTemperature();
   rtttl::playNumber(PIN_BUZZER,t);  
 }
+
+
+//------------------------------------------------
+void updateTempLSZ(float t) { 
+  const char *ls=0;
+
+  if      (t < 15.0)  { ls=LStempVeryColdZ;} 
+  else if (t < 18.0)  { ls=LStempColdZ;} 
+  else if (t < 21.0)  { ls=LStempOKZ;} 
+  else if (t < 24.0)  { ls=LStempWarmZ;} 
+  else if (t < 27.0)  { ls=LStempVeryWarmZ;} 
+  else if (t < 30.0)  { ls=LStempHotZ;} 
+  else                { ls=LStempVeryHotZ;} 
+
+  if (ls!=GLB_lsTempBK){
+    GLBledStrip.processCommands(ls,true);
+  } 
+  GLB_lsTempBK=ls;
+}
+//------------------------------------------------
+void updateTempLS(float t) { 
+  const char *ls=0;
+
+  if      (t < 15.0)  { ls=LStempVeryCold;} 
+  else if (t < 18.0)  { ls=LStempCold;} 
+  else if (t < 21.0)  { ls=LStempOK;} 
+  else if (t < 24.0)  { ls=LStempWarm;} 
+  else if (t < 27.0)  { ls=LStempVeryWarm;} 
+  else if (t < 30.0)  { ls=LStempHot;} 
+  else                { ls=LStempVeryHot;} 
+
+  if (ls!=GLB_lsTempBK){
+    GLBledStrip.processCommands(ls,true);
+  } 
+  GLB_lsTempBK=ls;
+}
+
 //------------------------------------------------
 //------------------------------------------------
 //------------------------------------------------
@@ -290,8 +399,9 @@ void setup() {
   mainTimers.setInterval(1000,GLBcallbackLoggingUltrasonic);
   mainTimers.setInterval(5000,GLBcallbackLoggingTemp);
   */
-
-
+  #ifdef LAMP_TEMPCOLOR_DEBUG
+  GLBledStrip.setDebug(true);
+  #endif
 
   randomSeed(analogRead(0));
 
@@ -346,9 +456,38 @@ void processSerialInputString()
 //-------------------------------------------------
 void STATE_init(void)
 {
-  #ifdef LAMP_STATES_DEBUG
-  Serial.println(F("STATE INIT -> WELCOME"));
+  #ifdef LAMP_TEMPCOLOR_DEBUG
+  int aux=0;
+
+  digitalWrite(PIN_LED_WHITE,LOW);
+  if (GLB_timerTempcolor == -1){
+    GLB_timerTempcolor=mainTimers.setTimeout(TIMEOUT_TEMPCOLOR,GLBcallbackTimeoutTempcolor);
+  }
+
+  if (GLB_timerTempcolor_expired){
+    GLB_Tempcolor+=3;
+    GLB_timerTempcolor_expired=false;
+
+    if (GLB_Tempcolor < 33){
+      Serial.print(F("LAMP_TEMPCOLOR_DEBUG "));
+      Serial.println(GLB_Tempcolor);
+      updateTempLS(GLB_Tempcolor);
+    }
+    else if (GLB_Tempcolor < 55) {
+      Serial.print(F("LAMP_TEMPCOLOR_DEBUG_Z "));
+      Serial.println(GLB_Tempcolor-7*3);
+      updateTempLSZ(GLB_Tempcolor-7*3);
+    }
+    else {
+      resetTimerTempcolor(); //will progress in next iteration
+      GLBledStrip.setDebug(false);
+      goto stdpath;     
+    }
+  }  
+  return;
   #endif
+
+stdpath:
 
 
   tone(PIN_BUZZER,1000,20);
@@ -358,6 +497,9 @@ void STATE_init(void)
   delay(500);
   digitalWrite(PIN_LED_WHITE,HIGH);
 
+  #ifdef LAMP_STATES_DEBUG
+  Serial.println(F("STATE INIT -> WELCOME"));
+  #endif
   GLBledStrip.processCommands(LSwelcome,true);
   GLBptrStateFunc=STATE_welcome;
   rtttl::beginF(PIN_BUZZER,warmingUp);
@@ -370,6 +512,7 @@ void STATE_welcome(void)
     //Force a pause TODO ADD A NEW STAGE AND NON-BLOCKING SING TEMP
     delay(1000);
     GLBledStrip.processCommands(LSidle,true);  
+    GLB_lsTempBK=0;
     GLBptrStateFunc=STATE_idle;
 #ifdef LAMP_STATES_DEBUG
     Serial.println(F("STATE WELCOME -> IDLE"));
@@ -431,13 +574,68 @@ void STATE_idle(void)
   if (GLBptrStateFunc!=STATE_idle) return;
  
   float t=GLBsensorDHT.getTemperature();
-  if      (t < 15.0)  { GLBledStrip.processCommands(LStempVeryCold,true);} 
-  else if (t < 18.0)  { GLBledStrip.processCommands(LStempCold,true);}  
-  else if (t < 21.0)  { GLBledStrip.processCommands(LStempOK,true);} 
-  else if (t < 24.0)  { GLBledStrip.processCommands(LStempWarm,true);} 
-  else if (t < 27.0)  { GLBledStrip.processCommands(LStempVeryWarm,true);}
-  else if (t < 30.0)  { GLBledStrip.processCommands(LStempHot,true);} 
-  else                { GLBledStrip.processCommands(LStempVeryHot,true);} 
+
+  updateTempLS(t);
+
+
+  if (GLB_timerIdleZ == -1){
+    GLB_timerIdleZ=mainTimers.setTimeout(TIMEOUT_IDLEZ,GLBcallbackTimeoutIdleZ);
+  }
+
+  if (GLB_timerIdleZ_expired){
+    GLB_timerIdleZ_expired=false;
+
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_idleZ ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.print(d2);
+#endif
+    Serial.println(".");
+#endif
+
+    resetTimerIdleZ();
+    GLBptrStateFunc=STATE_idleZ; 
+    return;
+  }
+}
+
+//-------------------------------------------------
+void STATE_idleZ(void)
+{
+ 
+  int d=GLBsensorHC.getLatestDistanceMedian();
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+  int d2=GLBsensorHC.getLatestDistanceRead();
+#endif
+
+  if (d < DISTANCE_A)            { 
+    //WAKE UP MY FRIEND! GO TO IDLE, THERE YOUR WAKE UP PROPERLY
+#ifdef LAMP_STATES_DEBUG
+    Serial.print(F("--->NEW STATE: STATE_idle ("));
+    Serial.print(d);
+#ifdef LAMP_HCSR04_MEDIAN_DEBUG
+    Serial.print(F(") "));
+    Serial.print(d2);
+#endif
+    Serial.println(".");
+#endif
+    GLBledStrip.processCommands(LSidle,true); 
+    GLB_lsTempBK=0; 
+    GLBptrStateFunc=STATE_idle; 
+    return;
+  } 
+
+  //WHITE LED TURN OFF
+  digitalWrite(PIN_LED_WHITE,LOW);
+  //LOW INTENSITY IN LD
+  float t=GLBsensorDHT.getTemperature();
+
+  updateTempLSZ(t);
+
+
+
 }
 
 
@@ -450,6 +648,7 @@ void STATE_LDcmd(void)
   }
   else if (GLBledStrip.isIdle()) {
     GLBledStrip.processCommands(LSidle,true);  
+    GLB_lsTempBK=0;
     GLBptrStateFunc=STATE_idle;
 #ifdef LAMP_STATES_DEBUG
     Serial.println(F("STATE LD CMD -> IDLE"));
@@ -480,6 +679,7 @@ void STATE_distanceZero(void)
 #endif
 
     GLBledStrip.processCommands(LSidle,true);  
+    GLB_lsTempBK=0;
     GLBptrStateFunc=STATE_idle; 
     //tone(PIN_BUZZER,2000,50); 
     return;
@@ -537,6 +737,7 @@ void STATE_distanceZero_T1(void)
 #endif
     rtttl::stop();
     GLBledStrip.processCommands(LSidle,true);  
+    GLB_lsTempBK=0;
     GLBptrStateFunc=STATE_idle; 
     return;
   } 
@@ -583,6 +784,7 @@ void STATE_distanceZero_T2(void)
 
     rtttl::stop();
     GLBledStrip.processCommands(LSidle,true);  
+    GLB_lsTempBK=0;
     GLBptrStateFunc=STATE_idle;     
     return;
   } 
@@ -626,6 +828,7 @@ void STATE_distanceZero_idle(void)
 #endif
 
     GLBledStrip.processCommands(LSidle,true);  
+    GLB_lsTempBK=0;
     GLBptrStateFunc=STATE_idle; 
     return;
   } 
@@ -769,7 +972,8 @@ void STATE_singing(void)
     Serial.println(".");
 #endif
 
-    GLBledStrip.processCommands(LSidle,true);  
+    GLBledStrip.processCommands(LSidle,true); 
+    GLB_lsTempBK=0; 
     GLBptrStateFunc=STATE_idle;
     return;
   }

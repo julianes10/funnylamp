@@ -16,7 +16,9 @@ Clock Lamp with the following functions:
 A lot of conditional compilation has been needed to debug and tune properly final project. This makes a bit ugly the code but needed.... Also massive usage of nasty global vars is also convinient to avoid bigger stack usage.
 
 ## Caution notes to remember
-CAUTION: never try to upload an sketch beyond 31.5K, it will damage nano bootloader.
+CAUTION:CAUTION:CAUTION:CAUTION:CAUTION:CAUTION:CAUTION:
+CAUTION: never try to upload an sketch beyond 31.5K, it will damage nano bootloader.  Program:   31420 bytes (95.9% Full) WILL DAMAGE!
+CAUTION:CAUTION:CAUTION:CAUTION:CAUTION:CAUTION:CAUTION:
 CAUTION: ram above 80% makes much easier an stackoverflow.
 
 ## Hardwawe

@@ -21,6 +21,13 @@ CAUTION: never try to upload an sketch beyond 31.5K, it will damage nano bootloa
 CAUTION:CAUTION:CAUTION:CAUTION:CAUTION:CAUTION:CAUTION:
 CAUTION: ram above 80% makes much easier an stackoverflow.
 
+USE nm to check what objectes are eating ram and flash used: e.g
+ /usr/share/arduino/hardware/tools/avr/bin/nm -Crtd --size-sort build-nano/arduino.elf 
+ /usr/share/arduino/hardware/tools/avr/bin/nm -Crtd --size-sort build-nano/arduino.elf | grep -i " [t] "   // For Flash tunning
+ /usr/share/arduino/hardware/tools/avr/bin/nm -Crtd --size-sort build-nano/arduino.elf | grep -iv " [t] "  // For Ram tunning 
+ 
+
+
 ## Hardwawe
 - Arduino nano
 - Temperature and humidity sensor DHT22
